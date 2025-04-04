@@ -22,17 +22,59 @@ class CustomImageFolder(datasets.ImageFolder):
         img_name = self.imgs[index][0]
 
         return image, label, img_name
+import os
+import cv2
+import numpy as np
+from imblearn.under_sampling import RandomUnderSampler
+from sklearn.model_selection import train_test_split
+import utils.loader as loader
+from torchvision import transforms, datasets
+import torch
+import torch.nn as nn
+from torch.utils.data import Subset, DataLoader
+from ray import train
+import pandas as pd
 
 
-def dataset_partition(dataset, noise_type, channels, min_shape, path_images, split_seed, interpretability=False, gradcam=False):
-    shape = determine_size(dataset, noise_type, min_shape, interpretability=interpretability)
-    img_transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Resize(shape, antialias=True),
-    ])
+class CustomImageFolder(datasets.ImageFolder):
+    def __init__(self, root, transform=None, loader=None):
+        super().__init__(root, transform=transform, loader=loader)
+
+    def __getitem__(self, index):
+        image, label = super().__getitem__(index)
+
+        img_name = self.imgs[index][0]
+
+        return image, label, img_name
+
+def partition_augmentation(path_images, channels, img_transforms, split_seed):
+    if channels == 1:
+        train_dataset = datasets.ImageFolder(root=path_images[0], transform=img_transforms,
+                                             loader=img_loader_one_channel)
+        test_dataset = datasets.ImageFolder(root=path_images[1], transform=img_transforms,
+                                            loader=img_loader_one_channel)
+    else:
+        train_dataset = datasets.ImageFolder(root=path_images[0], transform=img_transforms, loader=cv2.imread)
+        test_dataset = datasets.ImageFolder(root=path_images[1], transform=img_transforms, loader=cv2.imread)
+
+    labels = [train_dataset[label][1] for label in range(len(train_dataset))]
+    idx = np.arange(len(labels))
+
+    rus = RandomUnderSampler(sampling_strategy='all', random_state=split_seed)
+    idx_train_re, y_train_re = rus.fit_resample(idx.reshape(-1, 1), labels)
+    print('Resampled label train dataset shape %s')
+    print(pd.DataFrame(y_train_re).value_counts())
+    idx_train, idx_val, y_train, y_val = train_test_split(idx_train_re, y_train_re, stratify=y_train_re,
+                                                          test_size=0.2, random_state=split_seed)
+    train_subset = Subset(train_dataset, idx_train)
+    val_subset = Subset(train_dataset, idx_val)
+    return train_subset, val_subset, test_dataset, len(set(labels))
+
+
+def partition(gradcam, channels, path_images, img_transforms, split_seed):
     if gradcam:
         if channels == 1:
-            full_dataset = CustomImageFolder(root=path_images, transform=img_transforms,
+            full_dataset = CustomImageFolder(root=path_images[1], transform=img_transforms,
                                           loader=img_loader_one_channel)
         else:
             full_dataset = CustomImageFolder(root=path_images, transform=img_transforms,
@@ -51,9 +93,9 @@ def dataset_partition(dataset, noise_type, channels, min_shape, path_images, spl
 
     rus = RandomUnderSampler(sampling_strategy='all', random_state=split_seed)
     idx_train_re, y_train_re = rus.fit_resample(idx_train.reshape(-1, 1), y_train)
-    print('Resampled train dataset shape %s')
+    print('Resampled label train dataset shape %s')
     print(pd.DataFrame(y_train_re).value_counts())
-    print('Test dataset shape %s')
+    print('Test label dataset shape %s')
     print(pd.DataFrame(y_test).value_counts())
 
     idx_train, idx_val, y_train, y_val = train_test_split(idx_train_re, y_train_re, stratify=y_train_re,
@@ -62,33 +104,25 @@ def dataset_partition(dataset, noise_type, channels, min_shape, path_images, spl
     val_subset = Subset(full_dataset, idx_val.reshape(-1))
     test_subset = Subset(full_dataset, idx_test.reshape(-1))
 
-    return shape, train_subset, val_subset, test_subset, len(set(labels))
+    return train_subset, val_subset, test_subset, len(set(labels))
 
 
-def dataset_partition_augmented(dataset, noise_type, channels, min_shape, path_images, split_seed):
-    shape = determine_size(dataset, noise_type, min_shape, path_images[0])
+def dataset_partition(dataset, noise_type, channels, min_shape, path_images, split_seed, interpretability=False,
+                      gradcam=False, augmentation=False):
+    shape = determine_size(dataset, noise_type, min_shape, interpretability=interpretability)
     img_transforms = transforms.Compose([
             transforms.ToTensor(),
             transforms.Resize(shape, antialias=True),
     ])
-    if channels == 1:
-        train_dataset = datasets.ImageFolder(root=path_images[0], transform=img_transforms,
-                                             loader=img_loader_one_channel)
-        test_dataset = datasets.ImageFolder(root=path_images[1], transform=img_transforms,
-                                            loader=img_loader_one_channel)
+    if augmentation:
+        train_subset, val_subset, test_subset, n_labels =partition_augmentation(path_images, channels, img_transforms, split_seed)
     else:
-        train_dataset = datasets.ImageFolder(root=path_images[0], transform=img_transforms, loader=cv2.imread)
-        test_dataset = datasets.ImageFolder(root=path_images[1], transform=img_transforms, loader=cv2.imread)
+        train_subset, val_subset, test_subset, n_labels = partition(gradcam, channels, path_images, img_transforms, split_seed)
 
-    labels = [train_dataset[label][1] for label in range(len(train_dataset))]
-    idx = np.arange(len(labels))
-    idx_train, idx_val, y_train, y_val = train_test_split(idx, labels, stratify=labels,
-                                                          test_size=0.2, random_state=split_seed)
 
-    train_subset = Subset(train_dataset, idx_train)
-    val_subset = Subset(train_dataset, idx_val)
 
-    return shape, train_subset, val_subset, test_dataset
+    return shape, train_subset, val_subset, test_subset, n_labels
+
 
 
 def load_one_channel_image(dataset_id, noise_type, other_path=None, interpretability=False):
@@ -124,12 +158,12 @@ def img_loader_one_channel(path):
 
 def find_best_model(config, data):
     if data['augmented']:
-        shape, train_subset, val_subset, _ = dataset_partition_augmented(
+        shape, train_subset, val_subset,  _ ,num_classes = dataset_partition_augmented(
             data['dataset'], data['noise_type'], data['channels'], config['min_shape'], data['path_images'],
             data['split_seed']
         )
     else:
-        shape, train_subset, val_subset, _ ,_= dataset_partition(
+        shape, train_subset, val_subset, _ ,num_classes= dataset_partition(
             data['dataset'], data['noise_type'], data['channels'], config['min_shape'], data['path_images'],
             data['split_seed']
         )
@@ -140,7 +174,7 @@ def find_best_model(config, data):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    model = Cnn(shape[0], shape[1], data['channels'], config)
+    model = Cnn(shape[0], shape[1], data['channels'], config, num_classes=num_classes)
     device = "cpu"
     if torch.cuda.is_available():
         device = "cuda:0"
@@ -161,7 +195,7 @@ def find_best_model(config, data):
     train_loader = DataLoader(train_subset, batch_size=batch_size, pin_memory=True)
     val_loader = DataLoader(val_subset, batch_size=batch_size, pin_memory=True)
 
-    for epoch in range(3):
+    for epoch in range(5):
         model.train()
         for i, images in enumerate(train_loader):
             inputs, labels = images
@@ -201,13 +235,81 @@ def find_best_model(config, data):
 
     train.report({"loss": epoch_loss, "accuracy": epoch_accuracy})
 
+#
+# class Cnn(nn.Module):
+#     def __init__(self, in_size_height, in_size_width, in_channels, config):
+#         """
+#         :param in_size_height: initial height of the image
+#         :param in_size_width: initial width of the image
+#         :param config: hyperparameter configuration
+#         """
+#         super(Cnn, self).__init__()
+#         self.filters = config['filters']
+#         self.kernel_size = config['kernel_size']
+#         self.pool_size = config['pool_size']
+#         self.dense_units = config['dense_units']
+#         self.dropout_rate = config['dropout_rate']
+#
+#         # first convolutional layer
+#         self.cnn1 = nn.Conv2d(in_channels=in_channels, out_channels=self.filters, kernel_size=self.kernel_size)
+#         self.relu1 = nn.ReLU()
+#         self.cnn1bn = nn.BatchNorm2d(self.filters)
+#         self.maxpool1 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
+#         self.max1bn = nn.BatchNorm2d(self.filters)
+#
+#         # second convolutional layer
+#         self.cnn2 = nn.Conv2d(in_channels=self.filters, out_channels=self.filters, kernel_size=self.kernel_size)
+#         self.relu2 = nn.ReLU()
+#         self.cnn2bn = nn.BatchNorm2d(self.filters)
+#         self.maxpool2 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
+#         self.max2bn = nn.BatchNorm2d(self.filters)
+#         self.dropout = nn.Dropout(self.dropout_rate)
+#
+#         # first fully connected layer
+#         self.embedding_size = (self.filters * (
+#          int((int((in_size_height - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)) *
+#          (int((int((in_size_width - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)))
+#         self.fc1 = nn.Linear(self.embedding_size, self.dense_units)
+#         self.relufc1 = nn.ReLU()
+#         self.fc1bn = nn.BatchNorm1d(self.dense_units)
+#         self.dropout1 = nn.Dropout(self.dropout_rate,)
+#         self.drop1bn = nn.BatchNorm1d(self.dense_units)
+#
+#         # second fully connected layer
+#         self.fc2 = nn.Linear(self.dense_units, 1)
+#         self.sig = nn.Sigmoid()
+#
+#     def forward(self, x):
+#         """
+#         :param x: image
+#         :return: prediction
+#         """
+#         x = self.cnn1(x)
+#         x = self.cnn1bn(x)
+#         x = self.relu1(x)
+#         x = self.maxpool1(x)
+#
+#         x = self.cnn2(x)
+#         x = self.cnn2bn(x)
+#         x = self.maxpool2(x)
+#
+#         embed = x.view(x.size(0), -1)
+#
+#         x = self.fc1(embed)
+#         x = self.fc1bn(x)
+#         x = self.relufc1(x)
+#         x = self.dropout1(x)
+#         x = self.fc2(x)
+#         x = self.sig(x)
+#         return x
 
 class Cnn(nn.Module):
-    def __init__(self, in_size_height, in_size_width, in_channels, config):
+    def __init__(self, in_size_height, in_size_width, in_channels, config, num_classes):
         """
         :param in_size_height: initial height of the image
         :param in_size_width: initial width of the image
         :param config: hyperparameter configuration
+        :param num_classes: number of output classes (2 for binary, >2 for multiclass)
         """
         super(Cnn, self).__init__()
         self.filters = config['filters']
@@ -216,55 +318,56 @@ class Cnn(nn.Module):
         self.dense_units = config['dense_units']
         self.dropout_rate = config['dropout_rate']
 
-        # first convolutional layer
+        self.num_classes = num_classes
+        # First convolutional layer
         self.cnn1 = nn.Conv2d(in_channels=in_channels, out_channels=self.filters, kernel_size=self.kernel_size)
-        self.relu1 = nn.ReLU()
-        self.cnn1bn = nn.BatchNorm2d(self.filters)
+        self.relu1 = nn.ReLU(inplace=True)
+        self.cnn1_bn = nn.BatchNorm2d(self.filters)
         self.maxpool1 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max1bn = nn.BatchNorm2d(self.filters)
+        self.max1_bn = nn.BatchNorm2d(self.filters)
 
-        # second convolutional layer
+        # Second convolutional layer
         self.cnn2 = nn.Conv2d(in_channels=self.filters, out_channels=self.filters, kernel_size=self.kernel_size)
-        self.relu2 = nn.ReLU()
-        self.cnn2bn = nn.BatchNorm2d(self.filters)
+        self.relu2 = nn.ReLU(inplace=True)
+        self.cnn2_bn = nn.BatchNorm2d(self.filters)
         self.maxpool2 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max2bn = nn.BatchNorm2d(self.filters)
-        self.dropout = nn.Dropout(self.dropout_rate)
+        self.max2_bn = nn.BatchNorm2d(self.filters)
 
-        # first fully connected layer
+        # Fully connected layers
         self.embedding_size = (self.filters * (
-         int((int((in_size_height - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)) *
-         (int((int((in_size_width - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)))
+            int((int((
+                                 in_size_height - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)) *
+                               (int((int((
+                                                     in_size_width - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)))
         self.fc1 = nn.Linear(self.embedding_size, self.dense_units)
-        self.relufc1 = nn.ReLU()
-        self.fc1bn = nn.BatchNorm1d(self.dense_units)
-        self.dropout1 = nn.Dropout(self.dropout_rate,)
-        self.drop1bn = nn.BatchNorm1d(self.dense_units)
+        self.relu_fc1 = nn.ReLU(inplace=True)
+        self.fc1_bn = nn.BatchNorm1d(self.dense_units)
+        self.dropout1 = nn.Dropout(self.dropout_rate, inplace=True)
+        self.drop1_bn = nn.BatchNorm1d(self.dense_units)
 
-        # second fully connected layer
-        self.fc2 = nn.Linear(self.dense_units, 1)
-        self.sig = nn.Sigmoid()
+        if num_classes == 2:
+            self.fc2 = nn.Linear(self.dense_units, 1)  # Para clasificación binaria (una neurona)
+        else:
+            self.fc2 = nn.Linear(self.dense_units, num_classes)  # Para clasificación multiclase (num_classes neuronas)
+
+        # Para clasificación binaria, usar Sigmoid; para multiclase, no se aplica activación aquí
+        if num_classes == 2:
+            self.activation = nn.Sigmoid()  # Sigmoid para clasificación binaria
+        else:
+            self.activation = None  # Softmax para clasificación multiclasess
 
     def forward(self, x):
         """
         :param x: image
         :return: prediction
         """
-        x = self.cnn1(x)
-        x = self.cnn1bn(x)
-        x = self.relu1(x)
-        x = self.maxpool1(x)
-
-        x = self.cnn2(x)
-        x = self.cnn2bn(x)
-        x = self.maxpool2(x)
-
+        x = self.cnn1_bn(self.relu1(self.cnn1(x)))
+        x = self.max1_bn(self.maxpool1(x))
+        x = self.cnn2_bn(self.relu2(self.cnn2(x)))
+        x = self.max2_bn(self.maxpool2(x))
         embed = x.view(x.size(0), -1)
-
-        x = self.fc1(embed)
-        x = self.fc1bn(x)
-        x = self.relufc1(x)
-        x = self.dropout1(x)
+        x = self.drop1_bn(self.dropout1(self.fc1_bn(self.relu_fc1(self.fc1(embed)))))
         x = self.fc2(x)
-        x = self.sig(x)
+        if self.num_classes == 2:
+            x = self.activation(x)  # Apply Sigmoid for binary classification
         return x
