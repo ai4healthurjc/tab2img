@@ -4,33 +4,25 @@ import copy
 from tqdm import tqdm
 import numpy as np
 import pandas as pd
-import shutil
 import cv2
-
-from new_cnn_models import Cnn, find_best_model, dataset_partition, dataset_partition_augmented
+from utils.dataset_creation import create_datasets
+from new_cnn_models import Cnn, find_best_model, dataset_partition
 import utils.consts as cons
-import utils.loader as loader
-
 import torch
 import torch.nn as nn
 from torch.optim import lr_scheduler
 from torch.utils.data import DataLoader
-
 from imblearn.under_sampling import RandomUnderSampler
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score, recall_score, roc_auc_score
-
 import ray
 from ray import tune
 from ray.tune.search import ConcurrencyLimiter
-# from ray.tune.schedulers import ASHAScheduler
-# from ray.tune.search.basic_variant import BasicVariantGenerator
 from ray.tune.search.optuna import OptunaSearch
 from ray.tune.schedulers.hb_bohb import HyperBandForBOHB
 from ray.tune.search.bohb import TuneBOHB
 from ray.tune.search.hyperopt import HyperOptSearch
-
 import time
 import logging
 import coloredlogs
@@ -38,169 +30,6 @@ from multiprocessing import cpu_count
 
 logger = logging.getLogger(__name__)
 coloredlogs.install(level='DEBUG', logger=logger)
-
-
-# def create_dataset_from_png(dataset_id, noise_type, path_images, path_dataset, path_noise=None, seed=0):
-#     """
-#     :param dataset_id: name of the dataset to explore
-#     :param noise_type: type of noise added
-#     :param path_images: where images are stored
-#     :param path_dataset: where we want to create our dataset
-#     :param path_noise: where noisy datasets augmented are stored
-#     """
-#     if path_noise is None:
-#         images_paths = loader.load_images(dataset_id, noise_type)
-#         _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type)
-#     else:
-#         images_paths = loader.load_images(dataset_id, noise_type, path_images)
-#         _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type, path_noise)
-#
-#     rus = RandomUnderSampler(sampling_strategy='all', random_state=seed)
-#     images_resampled, y_resampled = rus.fit_resample(images_paths, labels)
-#     print('Resampled dataset shape %s' % y_resampled.value_counts())
-#
-#     images_resampled_name = [image[0].split('/')[-1] for image in images_paths]
-#     y_resampled = list(y_resampled)
-#
-#     os.makedirs(path_dataset)
-#     for label in list(set(y_resampled)):
-#         os.makedirs(os.path.join(path_dataset, str(label)))
-#         for n, image_label in enumerate(y_resampled):
-#             if image_label == label:
-#                 origin_path = os.path.join(path_images, images_resampled_name[n])
-#                 final_path_aux = os.path.join(path_dataset, str(label))
-#                 final_path = os.path.join(final_path_aux, images_resampled_name[n])
-#                 shutil.copy(str(origin_path), str(final_path))
-
-
-def create_dataset_from_png(dataset_id, noise_type, path_images, path_dataset, path_noise=None, seed=0):
-    """
-    :param dataset_id: name of the dataset to explore
-    :param noise_type: type of noise added
-    :param path_images: where images are stored
-    :param path_dataset: where we want to create our dataset
-    :param path_noise: where noisy datasets augmented are stored
-    """
-    if path_noise is None:
-        images_paths = loader.load_images(dataset_id, noise_type)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type)
-    else:
-        images_paths = loader.load_images(dataset_id, noise_type, path_images)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type, path_noise)
-
-    images_resampled_name = [image[0].split('/')[-1] for image in images_paths]
-    y_resampled = list(labels)
-
-    os.makedirs(path_dataset)
-    for label in list(set(y_resampled)):
-        os.makedirs(os.path.join(path_dataset, str(label)))
-        for n, image_label in enumerate(y_resampled):
-            if image_label == label:
-                origin_path = os.path.join(path_images, images_resampled_name[n])
-                final_path_aux = os.path.join(path_dataset, str(label))
-                final_path = os.path.join(final_path_aux, images_resampled_name[n])
-                shutil.copy(str(origin_path), str(final_path))
-
-
-
-
-# def create_dataset_from_txt(dataset_id, noise_type, path_images, path_dataset, path_noise=None, seed=0):
-#     """
-#     :param dataset_id: name of the dataset to explore
-#     :param noise_type: type of noise added
-#     :param path_images: where images are stored
-#     :param path_dataset: where we want to create our dataset
-#     :param path_noise: where noisy datasets augmented are stored
-#     """
-#     if path_noise is None:
-#         images_paths = loader.load_images_txt(dataset_id, noise_type)
-#         _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type)
-#     else:
-#         images_paths = loader.load_images_txt(dataset_id, noise_type, path_images)
-#         _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type, path_noise)
-#
-#     rus = RandomUnderSampler(sampling_strategy='all', random_state=seed)
-#     images_resampled, y_resampled = rus.fit_resample(images_paths, labels)
-#     print('Resampled dataset shape %s' % y_resampled.value_counts())
-#
-#     fullpath_images_resampled = [image[0] for image in images_resampled]
-#     name_images_resampled = [image[0].split('/')[-1].split('_')[1] for image in images_resampled]
-#     name_images_resampled = [f'_{i}_image.png' for i in name_images_resampled]
-#     y_resampled = list(y_resampled)
-#
-#     os.makedirs(path_dataset)
-#     for label in list(set(y_resampled)):
-#         os.makedirs(os.path.join(path_dataset, str(label)))
-#         for n, image_label in enumerate(y_resampled):
-#             if image_label == label:
-#                 with open(fullpath_images_resampled[n], 'r') as file:
-#                     rows = file.readlines()
-#                 pixel_values = []
-#                 for row in rows:
-#                     row_value = row.strip().split()
-#                     pixel_values.append([float(valor) for valor in row_value])
-#                 imagen_array = np.array(pixel_values)
-#                 cv2.imwrite(os.path.join(os.path.join(path_dataset, str(label)), name_images_resampled[n]),
-#                             imagen_array)
-#
-
-
-def create_dataset_from_txt(dataset_id, noise_type, path_images, path_dataset, path_noise=None, seed=0):
-    """
-    :param dataset_id: name of the dataset to explore
-    :param noise_type: type of noise added
-    :param path_images: where images are stored
-    :param path_dataset: where we want to create our dataset
-    :param path_noise: where noisy datasets augmented are stored
-    """
-    if path_noise is None:
-        images_paths = loader.load_images_txt(dataset_id, noise_type)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type)
-    else:
-        images_paths = loader.load_images_txt(dataset_id, noise_type, path_images)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type, path_noise)
-
-    print('Resampled dataset shape %s' % labels.value_counts())
-
-    fullpath_images_resampled = [image[0] for image in images_paths]
-    name_images_resampled = [image[0].split('/')[-1].split('_')[1] for image in images_paths]
-    name_images_resampled = [f'_{i}_image.png' for i in name_images_resampled]
-    y_resampled = list(labels)
-
-    os.makedirs(path_dataset)
-    for label in list(set(y_resampled)):
-        os.makedirs(os.path.join(path_dataset, str(label)))
-        for n, image_label in enumerate(y_resampled):
-            if image_label == label:
-                with open(fullpath_images_resampled[n], 'r') as file:
-                    rows = file.readlines()
-                pixel_values = []
-                for row in rows:
-                    row_value = row.strip().split()
-                    pixel_values.append([float(valor) for valor in row_value])
-                imagen_array = np.array(pixel_values)
-                cv2.imwrite(os.path.join(os.path.join(path_dataset, str(label)), name_images_resampled[n]),
-                            imagen_array)
-
-
-def create_datasets(path, dataset_name, noise_type, file_name=None, seed=0):
-    path_images = os.path.join(path, 'data')
-    path_dataset_png = os.path.join(path, 'dataset_from_png')
-    path_dataset_txt = os.path.join(path, 'dataset_from_txt')
-
-    if file_name is None:
-        if not os.path.exists(path_dataset_png):
-            create_dataset_from_png(dataset_name, noise_type, path_images, path_dataset_png, seed= seed)
-        if not os.path.exists(path_dataset_txt):
-            create_dataset_from_txt(dataset_name, noise_type, path_images, path_dataset_txt, seed= seed)
-    else:
-        path_noise = os.path.join(cons.PATH_PROJECT_CTGAN_NOISE, f'{file_name}.csv')
-        if not os.path.exists(path_dataset_png):
-            create_dataset_from_png(dataset_name, noise_type, path_images, path_dataset_png, path_noise,seed= seed)
-        if not os.path.exists(path_dataset_txt):
-            create_dataset_from_txt(dataset_name, noise_type, path_images, path_dataset_txt, path_noise,seed= seed)
-
-    return path_dataset_txt, path_dataset_png
 
 
 class EarlyStopper:
@@ -364,8 +193,8 @@ def testing(model, test_loader, device='cpu'):
 
 
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='steno_second', type=str)
-    parser.add_argument('--noise_type', default='heterogeneous', type=str)
+    parser.add_argument('--dataset', default='fram', type=str)
+    parser.add_argument('--noise_type', default='homogeneous', type=str)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--augmented', default=0, type=int)
     parser.add_argument('--type_sampling', default='over', type=str)
@@ -403,7 +232,7 @@ if __name__ == "__main__":
 
         if not args.augmented:
             path = os.path.join(cons.PATH_PROJECT_TAB_TO_IMAGE, f'image_{args.noise_type}_{args.dataset}')
-            path_dataset_txt, path_dataset_png = create_datasets(path, args.dataset, args.noise_type, seed=split_seed)
+            path_dataset_txt, path_dataset_png = create_datasets(path, args.dataset, args.noise_type)
 
         else:
             file_name = 'train_{}_{}_{}_{}_seed_{}'.format(args.dataset, args.noise_type, args.type_sampling,
@@ -411,14 +240,14 @@ if __name__ == "__main__":
             path = os.path.join(cons.PATH_PROJECT_TAB_TO_IMAGE, f'image_{args.noise_type}_{args.dataset}', 'ctgan',
                                 file_name)
             train_path_dataset_txt, train_path_dataset_png = create_datasets(path, args.dataset, args.noise_type,
-                                                                             file_name, split_seed)
+                                                                             file_name)
 
             file_name = 'test_{}_{}_{}_{}_seed_{}'.format(args.dataset, args.noise_type, args.type_sampling,
                                                           args.oversampler)
             path = os.path.join(cons.PATH_PROJECT_TAB_TO_IMAGE, f'image_{args.noise_type}_{args.dataset}', 'ctgan',
                                 file_name)
             test_path_dataset_txt, test_path_dataset_png = create_datasets(path, args.dataset, args.noise_type,
-                                                                           file_name, split_seed)
+                                                                           file_name)
 
             path_dataset_txt, path_dataset_png = ([train_path_dataset_txt, test_path_dataset_txt],
                                                   [train_path_dataset_png, test_path_dataset_png])
@@ -504,7 +333,7 @@ if __name__ == "__main__":
                 config=config,
                 metric="loss",
                 mode="min",
-                num_samples=4,
+                num_samples=30,
                 search_alg=algo,
                 scheduler=scheduler
             )
@@ -546,8 +375,8 @@ if __name__ == "__main__":
             print(f"Best trial config: {best_config}")
 
             if args.augmented:
-                shape, train_subset, val_subset, test_subset, n_classes = dataset_partition_augmented(
-                    args.dataset, args.noise_type, args.channels, best_config['min_shape'], path_dataset_txt, split_seed
+                shape, train_subset, val_subset, test_subset, n_classes = dataset_partition(
+                    args.dataset, args.noise_type, args.channels, best_config['min_shape'], path_dataset_txt, split_seed, augmentation=True
                 )
             else:
                 shape, train_subset, val_subset, test_subset, n_classes = dataset_partition(
@@ -560,7 +389,7 @@ if __name__ == "__main__":
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-            best_model = Cnn(shape[0], shape[1], args.channels, best_config)
+            best_model = Cnn(shape[0], shape[1], args.channels, best_config,n_classes)
             device = "cpu"
             if torch.cuda.is_available():
                 device = "cuda:0"

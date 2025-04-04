@@ -15,6 +15,7 @@ import cv2
 from pytorch_grad_cam import GradCAM
 from pytorch_grad_cam.utils.model_targets import ClassifierOutputTarget
 import os
+from utils.dataset_creation import create_datasets
 
 logger = logging.getLogger(__name__)
 coloredlogs.install(level='DEBUG', logger=logger)
@@ -271,74 +272,13 @@ def process_and_overlay_heatmaps(test_loader, test_loader_inter, gradcam, output
 
             print(f"Guardado: {combined_path}")
 
-
-def create_dataset_from_png(path, dataset_id, noise_type, path_images, path_dataset, interpretability=True):
-    """
-    :param dataset_id: name of the dataset to explore
-    :param noise_type: type of noise added
-    :param path_images: where images are stored
-    :param path_dataset: where we want to create our dataset
-    :param path_noise: where noisy datasets augmented are stored
-    """
-
-    if interpretability:
-        images_paths = loader.load_images_interpretability(dataset_id, noise_type)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type)
-    else:
-        images_paths = loader.load_images(dataset_id, noise_type,)
-        _, _, labels = loader.load_dataset_with_noise(dataset_id, noise_type, path)
-
-
-    images_resampled_name = [image[0].split('/')[-1] for image in images_paths]
-
-    os.makedirs(path_dataset, exist_ok=True)
-
-    for label in set(labels):
-        label_path = os.path.join(path_dataset, str(label))
-        os.makedirs(label_path, exist_ok=True)
-
-        for n, image_label in enumerate(labels):
-            if image_label == label:
-                origin_path = os.path.join(path_images, images_resampled_name[n])
-                final_path = os.path.join(label_path, images_resampled_name[n])
-
-                if origin_path != final_path:
-                    shutil.copy(str(origin_path), str(final_path))
-                else:
-                    print(f"El archivo {images_resampled_name[n]} ya está en el destino, no se copiará.")
-
-
-
-def create_datasets(path, dataset_name, noise_type, interpretability=True, file_name=None):
-
-    if interpretability:
-        path_images = os.path.join(path, 'data_interpretability')
-        path_dataset_png = os.path.join(path, 'dataset_from_png_interpretability')
-    else:
-        path_images = os.path.join(path, 'data')
-        path_dataset_png = os.path.join(path, 'dataset_from_png')
-
-    if file_name is None:
-        if not os.path.exists(path_dataset_png):
-            create_dataset_from_png(path, dataset_name, noise_type, path_images, path_dataset_png, interpretability)
-
-    else:
-        path_noise = os.path.join(cons.PATH_PROJECT_CTGAN_NOISE, f'{file_name}.csv')
-        if not os.path.exists(path_dataset_png):
-            create_dataset_from_png(dataset_name, noise_type, path_images, path_dataset_png, path_noise)
-
-    return path_dataset_png
-
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='steno_second', type=str)
+    parser.add_argument('--dataset', default='fram', type=str)
+    parser.add_argument('--noise_type', default='homogeneous', type=str)
+    parser.add_argument('--augmented', default=False, type=bool)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--seed', default=24, type=int)
     parser.add_argument('--n_jobs', default=14, type=int)
-    parser.add_argument('--fs', default='relief', type=str)
-    parser.add_argument('--agg_func', default='mean', type=str)
-    parser.add_argument('--noise_type', default='homogeneous', type=str)
-    parser.add_argument('--augmented', default=False, type=bool)
-
 
     return parser.parse_args()
 
@@ -404,6 +344,7 @@ if __name__ == "__main__":
     test_loader_inter = DataLoader(test_subset_inter, batch_size=batch_size, shuffle=False, pin_memory=False)
 
     print(test_loader)
+    print(len(test_loader))
 
     gradcam = GradCAM(trained_model, target_layer_name="cnn2", verbose=True)
 
