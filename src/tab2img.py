@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import argparse
 import math
-from utils.loader import load_dataset_with_noise, load_dataset_augmented
+from utils.loader import load_dataset_with_noise, load_dataset_augmented, load_preprocessed_dataset
 from igtd.igtd_functions import min_max_transform, table_to_image, select_features_by_variation
 from multiprocessing import cpu_count
 import logging
@@ -40,8 +40,9 @@ def tab_to_image_fnc(data, path):
 
 
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='steno_second', type=str)
-    parser.add_argument('--noise_type', default='homogeneous', type=str)
+    parser.add_argument('--dataset', default='hepatitis', type=str)
+    parser.add_argument('--noise_type', default='preprocessed', type=str)
+    parser.add_argument('--categorical_encoding', default='count', type=str)
     parser.add_argument('--augmented', default=0, type=int)
     parser.add_argument('--with_noise', default=0, type=int)
     parser.add_argument('--type_sampling', default='over', type=str)
@@ -85,5 +86,8 @@ if args.augmented:
         tab_to_image_fnc(X_test_scaled, test_subset_path)
 
 else:
-    path_dataset, data, y_label = load_dataset_with_noise(args.dataset, args.noise_type)
+    if args.noise_type=='preprocessed':
+        path_dataset, data, y_label = load_preprocessed_dataset(args.dataset, args.categorical_encoding)
+    else:
+        path_dataset, data, y_label = load_dataset_with_noise(args.dataset, args.noise_type)
     tab_to_image_fnc(data, result_dir)

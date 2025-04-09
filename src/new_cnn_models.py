@@ -325,14 +325,12 @@ class Cnn(nn.Module):
         self.relu1 = nn.ReLU()
         self.cnn1bn = nn.BatchNorm2d(self.filters)
         self.maxpool1 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max1bn = nn.BatchNorm2d(self.filters)
 
         # second convolutional layer
         self.cnn2 = nn.Conv2d(in_channels=self.filters, out_channels=self.filters, kernel_size=self.kernel_size)
         self.relu2 = nn.ReLU()
         self.cnn2bn = nn.BatchNorm2d(self.filters)
         self.maxpool2 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max2bn = nn.BatchNorm2d(self.filters)
         self.dropout = nn.Dropout(self.dropout_rate)
 
         # first fully connected layer
@@ -377,7 +375,6 @@ class Cnn(nn.Module):
         x = self.relufc1(x)
         x = self.fc1bn(x)
         x = self.dropout1(x)
-
         x = self.fc2(x)
         if self.num_classes == 2:
             x = self.activation(x)

@@ -274,7 +274,7 @@ def process_and_overlay_heatmaps(test_loader, test_loader_inter, gradcam, output
 
 def parse_arguments(parser):
     parser.add_argument('--dataset', default='hepatitis', type=str)
-    parser.add_argument('--noise_type', default='homogeneous', type=str)
+    parser.add_argument('--noise_type', default='preprocessed', type=str)
     parser.add_argument('--augmented', default=False, type=bool)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--seed', default=24, type=int)

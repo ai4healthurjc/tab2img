@@ -204,7 +204,7 @@ def testing(model, test_loader, num_classes, device='cpu'):
 
 def parse_arguments(parser):
     parser.add_argument('--dataset', default='hepatitis', type=str)
-    parser.add_argument('--noise_type', default='homogeneous', type=str)
+    parser.add_argument('--noise_type', default='preprocessed', type=str)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--augmented', default=0, type=int)
     parser.add_argument('--type_sampling', default='over', type=str)
@@ -343,7 +343,7 @@ if __name__ == "__main__":
                 config=config,
                 metric="loss",
                 mode="min",
-                num_samples=50,
+                num_samples=30,
                 search_alg=algo,
                 scheduler=scheduler
             )

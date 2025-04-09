@@ -361,9 +361,11 @@ def load_preprocessed_dataset(dataset_name, categorical_encoding):
 
     path_dataset = Path.joinpath(consts.PATH_PROJECT_DIR, 'data', 'processed',
                                  '{}_{}_preprocessed.csv'.format(dataset_name, categorical_encoding))
-
+    path_dataset2= Path.joinpath(consts.PATH_PROJECT_DIR, 'reports', 'noisy_dataset',
+                                 'noisy_dataset_preprocessed_{}.csv'.format(dataset_name))
     if path_dataset is not None:
         df = pd.read_csv(path_dataset)
+        df.to_csv(path_dataset2, index=False)
         logger.info('Loaded dataset: {}'.format(path_dataset))
         if 'label' not in df.columns.to_list():
             y_label = df.iloc[:, -1]
