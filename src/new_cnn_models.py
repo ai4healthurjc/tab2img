@@ -158,9 +158,9 @@ def img_loader_one_channel(path):
 
 def find_best_model(config, data):
     if data['augmented']:
-        shape, train_subset, val_subset,  _ ,num_classes = dataset_partition_augmented(
+        shape, train_subset, val_subset,  _ ,num_classes = dataset_partition(
             data['dataset'], data['noise_type'], data['channels'], config['min_shape'], data['path_images'],
-            data['split_seed']
+            data['split_seed'], augmentation=True
         )
     else:
         shape, train_subset, val_subset, _ ,num_classes= dataset_partition(
@@ -311,63 +311,75 @@ class Cnn(nn.Module):
         :param config: hyperparameter configuration
         :param num_classes: number of output classes (2 for binary, >2 for multiclass)
         """
+
         super(Cnn, self).__init__()
         self.filters = config['filters']
         self.kernel_size = config['kernel_size']
         self.pool_size = config['pool_size']
         self.dense_units = config['dense_units']
         self.dropout_rate = config['dropout_rate']
-
         self.num_classes = num_classes
-        # First convolutional layer
+
+        # first convolutional layer
         self.cnn1 = nn.Conv2d(in_channels=in_channels, out_channels=self.filters, kernel_size=self.kernel_size)
-        self.relu1 = nn.ReLU(inplace=True)
-        self.cnn1_bn = nn.BatchNorm2d(self.filters)
+        self.relu1 = nn.ReLU()
+        self.cnn1bn = nn.BatchNorm2d(self.filters)
         self.maxpool1 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max1_bn = nn.BatchNorm2d(self.filters)
+        self.max1bn = nn.BatchNorm2d(self.filters)
 
-        # Second convolutional layer
+        # second convolutional layer
         self.cnn2 = nn.Conv2d(in_channels=self.filters, out_channels=self.filters, kernel_size=self.kernel_size)
-        self.relu2 = nn.ReLU(inplace=True)
-        self.cnn2_bn = nn.BatchNorm2d(self.filters)
+        self.relu2 = nn.ReLU()
+        self.cnn2bn = nn.BatchNorm2d(self.filters)
         self.maxpool2 = nn.MaxPool2d(kernel_size=self.pool_size, stride=self.pool_size)
-        self.max2_bn = nn.BatchNorm2d(self.filters)
+        self.max2bn = nn.BatchNorm2d(self.filters)
+        self.dropout = nn.Dropout(self.dropout_rate)
 
-        # Fully connected layers
+        # first fully connected layer
         self.embedding_size = (self.filters * (
-            int((int((
-                                 in_size_height - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)) *
-                               (int((int((
-                                                     in_size_width - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)))
+         int((int((in_size_height - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)) *
+         (int((int((in_size_width - self.kernel_size + 1) / self.pool_size) - self.kernel_size + 1) / self.pool_size)))
         self.fc1 = nn.Linear(self.embedding_size, self.dense_units)
-        self.relu_fc1 = nn.ReLU(inplace=True)
-        self.fc1_bn = nn.BatchNorm1d(self.dense_units)
-        self.dropout1 = nn.Dropout(self.dropout_rate, inplace=True)
-        self.drop1_bn = nn.BatchNorm1d(self.dense_units)
+        self.relufc1 = nn.ReLU()
+        self.fc1bn = nn.BatchNorm1d(self.dense_units)
+        self.dropout1 = nn.Dropout(self.dropout_rate,)
+        self.drop1bn = nn.BatchNorm1d(self.dense_units)
+
+        # second fully connected layer
+        self.fc2 = nn.Linear(self.dense_units, 1)
+        self.sig = nn.Sigmoid()
 
         if num_classes == 2:
-            self.fc2 = nn.Linear(self.dense_units, 1)  # Para clasificación binaria (una neurona)
-        else:
-            self.fc2 = nn.Linear(self.dense_units, num_classes)  # Para clasificación multiclase (num_classes neuronas)
-
-        # Para clasificación binaria, usar Sigmoid; para multiclase, no se aplica activación aquí
-        if num_classes == 2:
+            self.fc2 = nn.Linear(self.dense_units, 1)
             self.activation = nn.Sigmoid()  # Sigmoid para clasificación binaria
+            # Para clasificación binaria (una neurona)
         else:
-            self.activation = None  # Softmax para clasificación multiclasess
+            self.fc2 = nn.Linear(self.dense_units, num_classes)
+            self.activation = None  # Softmax para clasificación multiclasess# Para clasificación multiclase (num_classes neuronas)
 
     def forward(self, x):
         """
         :param x: image
         :return: prediction
         """
-        x = self.cnn1_bn(self.relu1(self.cnn1(x)))
-        x = self.max1_bn(self.maxpool1(x))
-        x = self.cnn2_bn(self.relu2(self.cnn2(x)))
-        x = self.max2_bn(self.maxpool2(x))
+        x = self.cnn1(x)
+        x = self.relu1(x)
+        x = self.cnn1bn(x)
+        x = self.maxpool1(x)
+        x = self.cnn2(x)
+        x = self.relu2(x)
+        x = self.cnn2bn(x)
+        x = self.maxpool2(x)
+
         embed = x.view(x.size(0), -1)
-        x = self.drop1_bn(self.dropout1(self.fc1_bn(self.relu_fc1(self.fc1(embed)))))
+
+        x = self.fc1(embed)
+        x = self.relufc1(x)
+        x = self.fc1bn(x)
+        x = self.dropout1(x)
+
         x = self.fc2(x)
         if self.num_classes == 2:
-            x = self.activation(x)  # Apply Sigmoid for binary classification
+            x = self.activation(x)
         return x
+

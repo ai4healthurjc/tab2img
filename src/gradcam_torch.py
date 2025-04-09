@@ -273,7 +273,7 @@ def process_and_overlay_heatmaps(test_loader, test_loader_inter, gradcam, output
             print(f"Guardado: {combined_path}")
 
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='fram', type=str)
+    parser.add_argument('--dataset', default='hepatitis', type=str)
     parser.add_argument('--noise_type', default='homogeneous', type=str)
     parser.add_argument('--augmented', default=False, type=bool)
     parser.add_argument('--channels', default=1, type=int)

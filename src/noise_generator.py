@@ -311,6 +311,7 @@ def compute_clustering(x_data, clustering_method, n_clusters=True, random_state=
         clustering_model = AgglomerativeClustering(n_clusters=n_clusters, linkage='complete', affinity='precomputed')
         v_predicted_clustering, score = apply_clustering_model(clustering_model, dist_matrix)
         detected_clusters = n_clusters
+
     if plot:
         represent_UMAP(dist_matrix, score, baseline_score, v_predicted_clustering, save_name)
         represent_TSNE(dist_matrix, score, baseline_score, v_predicted_clustering, save_name)

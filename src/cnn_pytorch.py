@@ -84,7 +84,7 @@ def compute_classification_performance(y_true: np.array, y_pred: np.array) -> (f
     return acc_val, specificity_val, recall_val, roc_auc_val
 
 
-def training(model, n_epochs, device, train_loader, val_loader, criterion, optimizer, early_stopper, scheduler):
+def training(model, n_epochs, device, train_loader, val_loader, criterion, optimizer, early_stopper, scheduler,num_classes):
     torch.manual_seed(0)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(0)
@@ -106,8 +106,12 @@ def training(model, n_epochs, device, train_loader, val_loader, criterion, optim
             optimizer.zero_grad()
             if len(labels) > 1:
                 outputs = torch.squeeze(model(inputs))
-
-                loss = criterion(outputs, labels)
+                if num_classes == 2:
+                    labels = labels.squeeze()
+                    loss = criterion(outputs, labels)
+                else:
+                    labels = labels.long()
+                    loss = criterion(outputs, labels)
 
                 loss.backward()
                 optimizer.step()
@@ -129,7 +133,10 @@ def training(model, n_epochs, device, train_loader, val_loader, criterion, optim
 
                 if len(labels) >1:
                     outputs = torch.squeeze(model(inputs))
-                    predicted = (outputs.data >= 0.5)
+                    if num_classes == 2:
+                        predicted = (outputs.data >= 0.5)
+                    else:
+                        predicted = torch.argmax(outputs.data, dim=1)
                     total += labels.size(0)
                     correct += (predicted == labels).sum().item()
                     loss2 = criterion(outputs, labels)
@@ -159,7 +166,7 @@ def training(model, n_epochs, device, train_loader, val_loader, criterion, optim
     return best_loss, best_acc, best_model, epoch_loss_list, epoch_loss_list_train
 
 
-def testing(model, test_loader, device='cpu'):
+def testing(model, test_loader, num_classes, device='cpu'):
     """
     :param model: trained model
     :param device: device use to test the model
@@ -177,10 +184,13 @@ def testing(model, test_loader, device='cpu'):
             images, labels = images.to(dtype=torch.float).to(device), labels.to(dtype=torch.float).to(device)
             if len(labels) > 1:
                 outputs = torch.squeeze(model(images))
-                try:
-                    prediction = np.array([int(np.round(i.cpu(), 0)) for i in outputs.data])
-                except TypeError:
-                    prediction = np.array([int(np.round(outputs.data.cpu(), 0))])
+                if num_classes==2:
+                    try:
+                        prediction = np.array([int(np.round(i.cpu(), 0)) for i in outputs.data])
+                    except TypeError:
+                        prediction = np.array([int(np.round(outputs.data.cpu(), 0))])
+                else:
+                    prediction = torch.argmax(outputs, dim=1).cpu().numpy()
                 labels = np.array([int(i.cpu()) for i in labels])
                 predict_label.extend(prediction)
                 real_label.extend(labels)
@@ -193,7 +203,7 @@ def testing(model, test_loader, device='cpu'):
 
 
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='fram', type=str)
+    parser.add_argument('--dataset', default='hepatitis', type=str)
     parser.add_argument('--noise_type', default='homogeneous', type=str)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--augmented', default=0, type=int)
@@ -333,7 +343,7 @@ if __name__ == "__main__":
                 config=config,
                 metric="loss",
                 mode="min",
-                num_samples=30,
+                num_samples=50,
                 search_alg=algo,
                 scheduler=scheduler
             )
@@ -389,7 +399,7 @@ if __name__ == "__main__":
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
 
-            best_model = Cnn(shape[0], shape[1], args.channels, best_config,n_classes)
+            best_model = Cnn(shape[0], shape[1], args.channels, best_config, n_classes)
             device = "cpu"
             if torch.cuda.is_available():
                 device = "cuda:0"
@@ -402,8 +412,8 @@ if __name__ == "__main__":
                 optimizer = torch.optim.RMSprop(best_model.parameters(), lr=best_config['learning_rate'])
             else:
                 raise ValueError(f"Optimizer {best_config['optimizer']} not supported.")
-            scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=5, min_lr=1e-20)
-            early_stopper = EarlyStopper(patience=30, min_delta=0.0001, min_loss=0.3)
+            scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=3, min_lr=1e-20)
+            early_stopper = EarlyStopper(patience=30, min_delta=0.0001, min_loss=0.20)
 
             n_epochs = 500
             batch_size = int(len(train_subset)/best_config['n_batches']) + 1
@@ -418,7 +428,7 @@ if __name__ == "__main__":
                 val_loader = DataLoader(val_subset, batch_size=batch_size, pin_memory=True)
 
             val_loss, val_accuracy, best_trained_model, epoch_loss_list, epoch_loss_train = training(
-                best_model, n_epochs, device, train_loader, val_loader, criterion, optimizer, early_stopper, scheduler
+                best_model, n_epochs, device, train_loader, val_loader, criterion, optimizer, early_stopper, scheduler, n_classes
             )
 
             print(f"Best trial final validation loss: {val_loss}")
@@ -429,7 +439,7 @@ if __name__ == "__main__":
             models['trained_model'].append(best_trained_model)
 
             test_loader = DataLoader(test_subset, batch_size=batch_size)
-            test_results = testing(best_trained_model, test_loader, device)
+            test_results = testing(best_trained_model, test_loader,n_classes, device)
 
             list_acc_values.append(test_results[0])
             list_specificity_values.append(test_results[1])
