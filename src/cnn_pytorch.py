@@ -27,7 +27,7 @@ import time
 import logging
 import coloredlogs
 from multiprocessing import cpu_count
-
+from sklearn.preprocessing import label_binarize
 logger = logging.getLogger(__name__)
 coloredlogs.install(level='DEBUG', logger=logger)
 
@@ -72,17 +72,44 @@ def compute_classification_performance(y_true: np.array, y_pred: np.array) -> (f
     :param y_pred: predicted labels
     :return: accuracy, specificity, recall and roc_auc
     """
-    performance = classification_report(y_true, y_pred)
-    print(performance)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    if len(np.unique(y_true)) == 2:
+        performance = classification_report(y_true, y_pred)
+        print(performance)
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
 
-    acc_val = accuracy_score(y_true, y_pred)
-    specificity_val = tn / (tn + fp)
-    recall_val = recall_score(y_true, y_pred)
-    roc_auc_val = roc_auc_score(y_true, y_pred)
+        acc_val = accuracy_score(y_true, y_pred)
+        specificity_val = tn / (tn + fp)
+        recall_val = recall_score(y_true, y_pred)
+        roc_auc_val = roc_auc_score(y_true, y_pred)
+    else:  # Multiclass classification
+        # If `y_true` and `y_pred` are already class indices, no need for np.argmax
+        acc_val = accuracy_score(y_true, y_pred)
+        recall_val = recall_score(y_true, y_pred, average='macro')
 
-    return acc_val, specificity_val, recall_val, roc_auc_val
+        # Compute confusion matrix for specificity
+        cm = confusion_matrix(y_true, y_pred)
+        print(f"Confusion matrix:\n{cm}")
+        num_classes = cm.shape[0]
+        specificity_val = 0
 
+        for i in range(num_classes):
+            true_negatives = cm.sum() - (cm[i, :].sum() + cm[:, i].sum() - cm[i, i])
+            false_positives = cm[:, i].sum() - cm[i, i]
+            specificity_val += true_negatives / (true_negatives + false_positives)
+
+        specificity_val /= num_classes
+
+        # Compute ROC AUC
+        roc_auc_val = roc_auc_score(
+            label_binarize(y_true, classes=range(num_classes)),
+            label_binarize(y_pred, classes=range(num_classes)),
+            multi_class='ovr',
+            average='macro',
+        )
+
+        print('ACC:',acc_val, 'AUCROC:',roc_auc_val)
+
+        return acc_val, specificity_val, recall_val, roc_auc_val
 
 def training(model, n_epochs, device, train_loader, val_loader, criterion, optimizer, early_stopper, scheduler,num_classes):
     torch.manual_seed(0)
@@ -130,6 +157,11 @@ def training(model, n_epochs, device, train_loader, val_loader, criterion, optim
             with torch.no_grad():
                 inputs, labels = data
                 inputs, labels = inputs.to(dtype=torch.float).to(device), labels.to(dtype=torch.float).to(device)
+
+                if num_classes == 2:
+                    labels = labels.squeeze()
+                else:
+                    labels = labels.long()
 
                 if len(labels) >1:
                     outputs = torch.squeeze(model(inputs))
@@ -196,15 +228,14 @@ def testing(model, test_loader, num_classes, device='cpu'):
                 real_label.extend(labels)
             else:
                 continue
-
     results = compute_classification_performance(real_label, predict_label)
 
     return results
 
 
 def parse_arguments(parser):
-    parser.add_argument('--dataset', default='hepatitis', type=str)
-    parser.add_argument('--noise_type', default='preprocessed', type=str)
+    parser.add_argument('--dataset', default='dermat', type=str)
+    parser.add_argument('--noise_type', default='homogeneous', type=str)
     parser.add_argument('--channels', default=1, type=int)
     parser.add_argument('--augmented', default=0, type=int)
     parser.add_argument('--type_sampling', default='over', type=str)
@@ -405,7 +436,12 @@ if __name__ == "__main__":
                 device = "cuda:0"
             best_model.to(device)
 
-            criterion = nn.BCELoss()
+            # criterion = nn.BCELoss()
+            if n_classes == 2:
+                criterion = nn.BCEWithLogitsLoss()  # Binario
+            else:
+                criterion = nn.CrossEntropyLoss()
+
             if best_config['optimizer'] == 'adam':
                 optimizer = torch.optim.Adam(best_model.parameters(), lr=best_config['learning_rate'])
             elif best_config['optimizer'] == 'rmsprop':

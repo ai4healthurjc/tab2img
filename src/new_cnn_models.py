@@ -163,7 +163,7 @@ def find_best_model(config, data):
             data['split_seed'], augmentation=True
         )
     else:
-        shape, train_subset, val_subset, _ ,num_classes= dataset_partition(
+        shape, train_subset, val_subset, _ , num_classes= dataset_partition(
             data['dataset'], data['noise_type'], data['channels'], config['min_shape'], data['path_images'],
             data['split_seed']
         )
@@ -182,7 +182,13 @@ def find_best_model(config, data):
             model = nn.DataParallel(model)
     model.to(device)
 
-    criterion = nn.BCELoss()
+    # criterion = nn.BCELoss()
+
+    if num_classes == 2:
+        criterion = nn.BCEWithLogitsLoss()  # Binario
+    else:
+        criterion = nn.CrossEntropyLoss()
+
     if config['optimizer'] == 'adam':
         optimizer = torch.optim.Adam(model.parameters(), lr=config['learning_rate'])
     elif config['optimizer'] == 'rmsprop':
@@ -203,7 +209,12 @@ def find_best_model(config, data):
             optimizer.zero_grad()
             if len(labels) >1:
                 outputs = torch.squeeze(model(inputs))
-                loss = criterion(outputs, labels)
+                if num_classes == 2:
+                    labels = labels.float().unsqueeze(1)
+                    loss = criterion(outputs, labels)
+                else:
+                    labels = labels.long()
+                    loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
             else:
@@ -221,7 +232,13 @@ def find_best_model(config, data):
                 inputs, labels = inputs.to(dtype=torch.float).to(device), labels.to(dtype=torch.float).to(device)
                 if len(labels) > 1:
                     outputs = torch.squeeze(model(inputs))
-                    predicted = (outputs.data >= 0.5)
+                    # Calcular predicciones
+                    if num_classes == 2:
+                        labels = labels.float().unsqueeze(1)
+                        predicted = (torch.sigmoid(outputs) >= 0.5).float()
+                    else:
+                        labels = labels.long()
+                        predicted = torch.argmax(outputs, dim=1)
                     total += labels.size(0)
                     correct += (predicted == labels).sum().item()
                     loss = criterion(outputs, labels)

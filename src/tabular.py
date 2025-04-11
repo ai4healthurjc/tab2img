@@ -161,7 +161,7 @@ for idx in consts.SEEDS:
 
         model_clf = LogisticRegression(solver='liblinear', max_iter=500, random_state=idx)
 
-    grid_cv = GridSearchCV(estimator=model_clf, param_grid=hyperparams_clf, scoring='roc_auc', cv=5, n_jobs=args.n_jobs)
+    grid_cv = GridSearchCV(estimator=model_clf, param_grid=hyperparams_clf, scoring='accuracy', cv=5, n_jobs=args.n_jobs)
     grid_cv.fit(X_train_scaled, Y_train)
 
     clf_model = grid_cv.best_estimator_
